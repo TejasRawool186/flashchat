@@ -1,243 +1,808 @@
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const cheerio = require('cheerio');
+
+// ─── Configuration ───────────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 3001;
+const CORS_ORIGIN = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+  : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+const ROOM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+const ROOM_CODE_LENGTH = 6;
+const MAX_ROOM_USERS = 5;
+const SOCKET_RATE_LIMIT = 30; // messages per minute per socket
+const SOCKET_RATE_WINDOW = 60 * 1000; // 1 minute
+const LINK_CACHE_MAX = 100;
+const LINK_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const MAX_MESSAGES_PER_ROOM = 500;
+
+// ─── Express App Setup ───────────────────────────────────────────────────────
 
 const app = express();
 const server = http.createServer(app);
+
+// Security middleware
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+
+// CORS
+app.use(cors({ origin: CORS_ORIGIN, methods: ['GET', 'POST'] }));
+app.use(express.json({ limit: '1mb' }));
+
+// HTTP rate limiter: 100 requests per 15 minutes
+const httpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+app.use('/api/', httpLimiter);
+
+// ─── Socket.IO Setup ────────────────────────────────────────────────────────
+
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-    methods: ['GET', 'POST']
+    origin: CORS_ORIGIN,
+    methods: ['GET', 'POST'],
   },
-  maxHttpBufferSize: 10e6 // 10MB for file transfers
+  maxHttpBufferSize: 10e6, // 10MB for file transfers
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
-app.use(cors());
-app.use(express.json());
+// ─── In-Memory Stores ───────────────────────────────────────────────────────
 
-// Store active rooms in memory (no database)
 const rooms = new Map();
+const linkPreviewCache = new Map();
 
-// Generate random 6-digit room code
+// ─── Utility Functions ──────────────────────────────────────────────────────
+
+/**
+ * Sanitize user input — strip HTML tags and script injections.
+ */
+function sanitize(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/javascript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    .trim()
+    .slice(0, 5000); // hard cap at 5000 chars
+}
+
+/**
+ * Sanitize a filename — remove path traversal and dangerous chars.
+ */
+function sanitizeFilename(name) {
+  if (typeof name !== 'string') return 'unnamed';
+  return name
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/\.\./g, '_')
+    .trim()
+    .slice(0, 255) || 'unnamed';
+}
+
+/**
+ * Generate a random alphanumeric room code (6 chars).
+ */
 function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars (0/O, 1/I)
   let code;
   do {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
+    code = '';
+    for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
   } while (rooms.has(code));
   return code;
 }
 
-// Room cleanup timeout (5 minutes of inactivity)
-const ROOM_TIMEOUT = 5 * 60 * 1000;
+/**
+ * Generate a unique message ID.
+ */
+function generateMessageId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
-// Socket.IO connection handling
+/**
+ * Build the user list for a room (to broadcast).
+ */
+function getUserList(room) {
+  const users = [];
+  for (const [id, user] of room.users) {
+    users.push({
+      id,
+      name: user.name,
+      joinedAt: user.joinedAt,
+      hasPublicKey: !!user.publicKey,
+    });
+  }
+  return users;
+}
+
+/**
+ * Broadcast user list update to everyone in a room.
+ */
+function broadcastUserList(roomCode, room) {
+  io.to(roomCode).emit('user-list-update', {
+    users: getUserList(room),
+    deviceCount: room.users.size,
+  });
+}
+
+// ─── Socket Rate Limiting ───────────────────────────────────────────────────
+
+const socketMessageCounts = new Map();
+
+function checkSocketRateLimit(socketId) {
+  const now = Date.now();
+  let entry = socketMessageCounts.get(socketId);
+
+  if (!entry || now - entry.windowStart > SOCKET_RATE_WINDOW) {
+    entry = { windowStart: now, count: 0 };
+    socketMessageCounts.set(socketId, entry);
+  }
+
+  entry.count++;
+  return entry.count <= SOCKET_RATE_LIMIT;
+}
+
+function clearSocketRateLimit(socketId) {
+  socketMessageCounts.delete(socketId);
+}
+
+// ─── SSRF Protection for Link Previews ──────────────────────────────────────
+
+function isPrivateIP(hostname) {
+  // Block private/reserved IPs
+  const privateRanges = [
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^0\./,
+    /^169\.254\./,
+    /^::1$/,
+    /^fc00:/i,
+    /^fe80:/i,
+    /^fd/i,
+    /^localhost$/i,
+  ];
+  return privateRanges.some((re) => re.test(hostname));
+}
+
+// ─── Link Preview Cache Management ─────────────────────────────────────────
+
+function getCachedPreview(url) {
+  const cached = linkPreviewCache.get(url);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > LINK_CACHE_TTL) {
+    linkPreviewCache.delete(url);
+    return null;
+  }
+  return cached.data;
+}
+
+function setCachedPreview(url, data) {
+  // Evict oldest entries if over capacity
+  if (linkPreviewCache.size >= LINK_CACHE_MAX) {
+    const firstKey = linkPreviewCache.keys().next().value;
+    linkPreviewCache.delete(firstKey);
+  }
+  linkPreviewCache.set(url, { data, timestamp: Date.now() });
+}
+
+// ─── HTTP Endpoints ─────────────────────────────────────────────────────────
+
+// Health check
+app.get('/api/health', (req, res) => {
+  let totalUsers = 0;
+  for (const [, room] of rooms) {
+    totalUsers += room.users.size;
+  }
+
+  res.json({
+    status: 'ok',
+    uptime: Math.floor(process.uptime()),
+    rooms: rooms.size,
+    connectedUsers: totalUsers,
+    timestamp: new Date().toISOString(),
+    version: '2.0.0',
+  });
+});
+
+// Link preview endpoint
+app.get('/api/link-preview', async (req, res) => {
+  try {
+    const { url } = req.query;
+
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid url parameter' });
+    }
+
+    // Validate URL format
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Only allow http/https
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return res.status(400).json({ error: 'Only HTTP/HTTPS URLs are allowed' });
+    }
+
+    // SSRF protection — block private IPs
+    if (isPrivateIP(parsedUrl.hostname)) {
+      return res.status(403).json({ error: 'Access to private/internal addresses is blocked' });
+    }
+
+    // Check cache
+    const cached = getCachedPreview(url);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    // Fetch the URL with a timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'FlashChat-LinkPreview/2.0 (compatible)',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        redirect: 'follow',
+      });
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      if (fetchErr.name === 'AbortError') {
+        return res.status(504).json({ error: 'Request timed out' });
+      }
+      return res.status(502).json({ error: 'Failed to fetch URL' });
+    }
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return res.status(502).json({ error: `Remote server returned ${response.status}` });
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) {
+      return res.status(400).json({ error: 'URL does not return HTML content' });
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    const preview = {
+      title:
+        $('meta[property="og:title"]').attr('content') ||
+        $('meta[name="twitter:title"]').attr('content') ||
+        $('title').text() ||
+        null,
+      description:
+        $('meta[property="og:description"]').attr('content') ||
+        $('meta[name="twitter:description"]').attr('content') ||
+        $('meta[name="description"]').attr('content') ||
+        null,
+      image:
+        $('meta[property="og:image"]').attr('content') ||
+        $('meta[name="twitter:image"]').attr('content') ||
+        null,
+      siteName:
+        $('meta[property="og:site_name"]').attr('content') || null,
+      url,
+    };
+
+    // Resolve relative image URLs
+    if (preview.image && !preview.image.startsWith('http')) {
+      try {
+        preview.image = new URL(preview.image, url).href;
+      } catch {
+        preview.image = null;
+      }
+    }
+
+    // Trim long strings
+    if (preview.title) preview.title = preview.title.slice(0, 300);
+    if (preview.description) preview.description = preview.description.slice(0, 500);
+
+    setCachedPreview(url, preview);
+    res.json(preview);
+  } catch (err) {
+    console.error('Link preview error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Socket.IO Connection Handling ──────────────────────────────────────────
+
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   let currentRoom = null;
+  let currentUserName = 'Anonymous';
 
-  // Create a new room
-  socket.on('create-room', (callback) => {
-    const roomCode = generateRoomCode();
-    rooms.set(roomCode, {
-      users: new Map(),
-      messages: [],
-      createdAt: Date.now(),
-      timeout: null
-    });
+  // ── Create Room ────────────────────────────────────────────────────────
 
-    currentRoom = roomCode;
-    socket.join(roomCode);
-    rooms.get(roomCode).users.set(socket.id, { joinedAt: Date.now() });
+  socket.on('create-room', (data, callback) => {
+    // Support old signature: (callback) and new: (data, callback)
+    if (typeof data === 'function') {
+      callback = data;
+      data = {};
+    }
 
-    console.log(`Room ${roomCode} created by ${socket.id}`);
-    callback({ success: true, roomCode, deviceCount: 1 });
+    try {
+      const roomCode = generateRoomCode();
+      const userName = sanitize(data?.userName || data?.senderName || 'Anonymous');
+      currentUserName = userName;
+
+      rooms.set(roomCode, {
+        users: new Map(),
+        messages: [],
+        reactions: new Map(), // messageId -> Map(emoji -> Set(userId))
+        createdAt: Date.now(),
+        createdBy: socket.id,
+        creatorName: userName,
+        timeout: null,
+      });
+
+      currentRoom = roomCode;
+      socket.join(roomCode);
+
+      const room = rooms.get(roomCode);
+      room.users.set(socket.id, {
+        name: userName,
+        joinedAt: Date.now(),
+        publicKey: null,
+      });
+
+      console.log(`Room ${roomCode} created by ${userName} (${socket.id})`);
+      broadcastUserList(roomCode, room);
+
+      if (typeof callback === 'function') {
+        callback({ success: true, roomCode, deviceCount: 1 });
+      }
+    } catch (err) {
+      console.error('Error creating room:', err.message);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: 'Failed to create room' });
+      }
+    }
   });
 
-  // Join an existing room
-  socket.on('join-room', (roomCode, callback) => {
-    const room = rooms.get(roomCode);
+  // ── Join Room ──────────────────────────────────────────────────────────
 
-    if (!room) {
-      callback({ success: false, error: 'Invalid or expired room code' });
-      return;
+  socket.on('join-room', (roomCode, data, callback) => {
+    // Support old signature: (roomCode, callback) and new: (roomCode, data, callback)
+    if (typeof data === 'function') {
+      callback = data;
+      data = {};
     }
 
-    if (room.users.size >= 5) {
-      callback({ success: false, error: 'Room is full (max 5 devices)' });
-      return;
+    try {
+      if (typeof roomCode !== 'string') {
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Invalid room code' });
+        }
+        return;
+      }
+
+      roomCode = roomCode.toUpperCase().trim();
+      const room = rooms.get(roomCode);
+
+      if (!room) {
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Invalid or expired room code' });
+        }
+        return;
+      }
+
+      if (room.users.size >= MAX_ROOM_USERS) {
+        if (typeof callback === 'function') {
+          callback({ success: false, error: `Room is full (max ${MAX_ROOM_USERS} devices)` });
+        }
+        return;
+      }
+
+      // Clear timeout if exists
+      if (room.timeout) {
+        clearTimeout(room.timeout);
+        room.timeout = null;
+      }
+
+      const userName = sanitize(data?.userName || data?.senderName || 'Anonymous');
+      currentUserName = userName;
+      currentRoom = roomCode;
+      socket.join(roomCode);
+
+      room.users.set(socket.id, {
+        name: userName,
+        joinedAt: Date.now(),
+        publicKey: null,
+      });
+
+      const deviceCount = room.users.size;
+
+      // Notify all users about new device
+      io.to(roomCode).emit('device-update', {
+        deviceCount,
+        message: `${userName} joined`,
+      });
+
+      broadcastUserList(roomCode, room);
+
+      console.log(`User ${userName} (${socket.id}) joined room ${roomCode}. Devices: ${deviceCount}`);
+
+      // Send chat history to the new user
+      if (room.messages && room.messages.length > 0) {
+        socket.emit('chat-history', room.messages);
+      }
+
+      // Send current reaction state
+      if (room.reactions.size > 0) {
+        const reactionsSnapshot = {};
+        for (const [messageId, emojiMap] of room.reactions) {
+          reactionsSnapshot[messageId] = {};
+          for (const [emoji, userSet] of emojiMap) {
+            reactionsSnapshot[messageId][emoji] = Array.from(userSet);
+          }
+        }
+        socket.emit('reactions-sync', reactionsSnapshot);
+      }
+
+      if (typeof callback === 'function') {
+        callback({ success: true, roomCode, deviceCount });
+      }
+    } catch (err) {
+      console.error('Error joining room:', err.message);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: 'Failed to join room' });
+      }
     }
-
-    // Clear timeout if exists
-    if (room.timeout) {
-      clearTimeout(room.timeout);
-      room.timeout = null;
-    }
-
-    currentRoom = roomCode;
-    socket.join(roomCode);
-    room.users.set(socket.id, { joinedAt: Date.now() });
-
-    const deviceCount = room.users.size;
-
-    // Notify all users in room about new device
-    io.to(roomCode).emit('device-update', {
-      deviceCount,
-      message: 'A new device joined'
-    });
-
-    console.log(`User ${socket.id} joined room ${roomCode}. Devices: ${deviceCount}`);
-
-    // Send chat history to the new user
-    if (room.messages && room.messages.length > 0) {
-      socket.emit('chat-history', room.messages);
-    }
-
-    callback({ success: true, roomCode, deviceCount });
   });
 
-  // Send a text message
+  // ── E2E Encryption Key Exchange ────────────────────────────────────────
+
+  socket.on('key-exchange', (data) => {
+    if (!currentRoom) return;
+
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // Store the public key for this user
+    const user = room.users.get(socket.id);
+    if (user && data?.publicKey) {
+      user.publicKey = data.publicKey;
+    }
+
+    // Relay the public key to all other room members
+    socket.to(currentRoom).emit('public-key', {
+      userId: socket.id,
+      userName: currentUserName,
+      publicKey: data?.publicKey,
+    });
+
+    // Update user list so others know this user has a key
+    broadcastUserList(currentRoom, room);
+  });
+
+  // ── Send Message ───────────────────────────────────────────────────────
+
   socket.on('send-message', (data) => {
     if (!currentRoom) return;
 
-    const messageData = {
-      id: Date.now().toString(),
-      text: data.text,
-      senderId: socket.id,
-      senderName: data.senderName || 'Anonymous',
-      timestamp: new Date().toISOString(),
-      type: data.type || 'text',
-      language: data.language || null,
-      messageType: data.type || 'text'
-    };
-
-    // Store message in room history
-    const room = rooms.get(currentRoom);
-    if (room) {
-      room.messages.push(messageData);
+    // Socket rate limiting
+    if (!checkSocketRateLimit(socket.id)) {
+      socket.emit('error-message', {
+        error: 'Rate limit exceeded. Please slow down.',
+        code: 'RATE_LIMIT',
+      });
+      return;
     }
 
-    // Broadcast to all devices in room (including sender for confirmation)
-    io.to(currentRoom).emit('new-message', messageData);
+    try {
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+
+      const messageId = generateMessageId();
+
+      const messageData = {
+        id: messageId,
+        text: data.encrypted ? data.text : sanitize(data.text), // don't sanitize encrypted blobs
+        senderId: socket.id,
+        senderName: sanitize(data.senderName) || currentUserName,
+        timestamp: new Date().toISOString(),
+        type: data.type || 'text',
+        language: data.language || null,
+        messageType: data.type || 'text',
+        encrypted: !!data.encrypted,
+        replyTo: data.replyTo
+          ? {
+              id: data.replyTo.id,
+              text: data.encrypted ? data.replyTo.text : sanitize(data.replyTo.text),
+              senderName: sanitize(data.replyTo.senderName),
+            }
+          : null,
+      };
+
+      // Store message in room history (cap at MAX_MESSAGES_PER_ROOM)
+      room.messages.push(messageData);
+      if (room.messages.length > MAX_MESSAGES_PER_ROOM) {
+        room.messages.shift();
+      }
+
+      // Broadcast to all in room
+      io.to(currentRoom).emit('new-message', messageData);
+
+      // Send delivery confirmation to sender
+      socket.emit('message-delivered', {
+        messageId,
+        deliveredAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Error sending message:', err.message);
+    }
   });
 
-  // Typing indicator events
-  socket.on('typing-start', () => {
+  // ── Message Reactions ──────────────────────────────────────────────────
+
+  socket.on('add-reaction', (data) => {
     if (!currentRoom) return;
-    socket.to(currentRoom).emit('typing-start');
+
+    try {
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+
+      const { messageId, emoji } = data;
+      if (!messageId || !emoji) return;
+
+      // Initialize reaction map for this message if needed
+      if (!room.reactions.has(messageId)) {
+        room.reactions.set(messageId, new Map());
+      }
+
+      const emojiMap = room.reactions.get(messageId);
+      if (!emojiMap.has(emoji)) {
+        emojiMap.set(emoji, new Set());
+      }
+
+      emojiMap.get(emoji).add(socket.id);
+
+      // Build reaction summary for broadcast
+      const reactionSummary = {};
+      for (const [em, userSet] of emojiMap) {
+        reactionSummary[em] = Array.from(userSet);
+      }
+
+      io.to(currentRoom).emit('reaction-update', {
+        messageId,
+        reactions: reactionSummary,
+        action: 'add',
+        emoji,
+        userId: socket.id,
+        userName: currentUserName,
+      });
+    } catch (err) {
+      console.error('Error adding reaction:', err.message);
+    }
   });
 
-  socket.on('typing-stop', () => {
+  socket.on('remove-reaction', (data) => {
     if (!currentRoom) return;
-    socket.to(currentRoom).emit('typing-stop');
+
+    try {
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+
+      const { messageId, emoji } = data;
+      if (!messageId || !emoji) return;
+
+      const emojiMap = room.reactions.get(messageId);
+      if (!emojiMap) return;
+
+      const userSet = emojiMap.get(emoji);
+      if (!userSet) return;
+
+      userSet.delete(socket.id);
+
+      // Clean up empty sets/maps
+      if (userSet.size === 0) emojiMap.delete(emoji);
+      if (emojiMap.size === 0) room.reactions.delete(messageId);
+
+      // Build reaction summary for broadcast
+      const reactionSummary = {};
+      if (room.reactions.has(messageId)) {
+        for (const [em, us] of room.reactions.get(messageId)) {
+          reactionSummary[em] = Array.from(us);
+        }
+      }
+
+      io.to(currentRoom).emit('reaction-update', {
+        messageId,
+        reactions: reactionSummary,
+        action: 'remove',
+        emoji,
+        userId: socket.id,
+        userName: currentUserName,
+      });
+    } catch (err) {
+      console.error('Error removing reaction:', err.message);
+    }
   });
 
-  // File transfer - start
+  // ── Read Receipts ─────────────────────────────────────────────────────
+
+  socket.on('message-read', (data) => {
+    if (!currentRoom) return;
+
+    try {
+      const { messageId } = data;
+      if (!messageId) return;
+
+      // Broadcast read status to everyone in the room
+      io.to(currentRoom).emit('message-status-update', {
+        messageId,
+        readBy: socket.id,
+        readByName: currentUserName,
+        readAt: new Date().toISOString(),
+        status: 'read',
+      });
+    } catch (err) {
+      console.error('Error processing read receipt:', err.message);
+    }
+  });
+
+  // ── Typing Indicators ─────────────────────────────────────────────────
+
+  socket.on('typing-start', (data) => {
+    if (!currentRoom) return;
+    socket.to(currentRoom).emit('typing-start', {
+      userId: socket.id,
+      userName: data?.userName || currentUserName,
+    });
+  });
+
+  socket.on('typing-stop', (data) => {
+    if (!currentRoom) return;
+    socket.to(currentRoom).emit('typing-stop', {
+      userId: socket.id,
+      userName: data?.userName || currentUserName,
+    });
+  });
+
+  // ── File Transfer ─────────────────────────────────────────────────────
+
   socket.on('file-start', (data) => {
     if (!currentRoom) return;
 
     socket.to(currentRoom).emit('file-start', {
       fileId: data.fileId,
-      fileName: data.fileName,
+      fileName: sanitizeFilename(data.fileName),
       fileSize: data.fileSize,
       fileType: data.fileType,
       senderId: socket.id,
-      senderName: data.senderName || 'Anonymous',
-      totalChunks: data.totalChunks
+      senderName: sanitize(data.senderName) || currentUserName,
+      totalChunks: data.totalChunks,
     });
   });
 
-  // File transfer - chunk
   socket.on('file-chunk', (data) => {
     if (!currentRoom) return;
 
     socket.to(currentRoom).emit('file-chunk', {
       fileId: data.fileId,
       chunk: data.chunk,
-      chunkIndex: data.chunkIndex
+      chunkIndex: data.chunkIndex,
     });
   });
 
-  // File transfer - complete
   socket.on('file-complete', (data) => {
     if (!currentRoom) return;
 
-    socket.to(currentRoom).emit('file-complete', {
-      fileId: data.fileId,
-      fileName: data.fileName,
-      senderId: socket.id
-    });
+    try {
+      socket.to(currentRoom).emit('file-complete', {
+        fileId: data.fileId,
+        fileName: sanitizeFilename(data.fileName),
+        senderId: socket.id,
+      });
 
-    // Notify all (including sender) about the file message
-    const fileMessage = {
-      id: data.fileId,
-      fileName: data.fileName,
-      fileSize: data.fileSize,
-      fileType: data.fileType,
-      senderId: socket.id,
-      senderName: data.senderName || 'Anonymous',
-      timestamp: new Date().toISOString(),
-      type: 'file'
-    };
+      const fileMessage = {
+        id: data.fileId,
+        fileName: sanitizeFilename(data.fileName),
+        fileSize: data.fileSize,
+        fileType: data.fileType,
+        senderId: socket.id,
+        senderName: sanitize(data.senderName) || currentUserName,
+        timestamp: new Date().toISOString(),
+        type: 'file',
+      };
 
-    // Store file message in room history
-    const room = rooms.get(currentRoom);
-    if (room) {
-      room.messages.push(fileMessage);
+      const room = rooms.get(currentRoom);
+      if (room) {
+        room.messages.push(fileMessage);
+        if (room.messages.length > MAX_MESSAGES_PER_ROOM) {
+          room.messages.shift();
+        }
+      }
+
+      io.to(currentRoom).emit('new-message', fileMessage);
+    } catch (err) {
+      console.error('Error completing file transfer:', err.message);
     }
-
-    io.to(currentRoom).emit('new-message', fileMessage);
   });
 
-  // Leave room
+  // ── Leave Room ─────────────────────────────────────────────────────────
+
   socket.on('leave-room', () => {
     handleDisconnect();
   });
 
-  // Handle disconnection
+  // ── Disconnect ─────────────────────────────────────────────────────────
+
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+    console.log(`User disconnected: ${currentUserName} (${socket.id})`);
     handleDisconnect();
   });
 
   function handleDisconnect() {
     if (!currentRoom) return;
 
-    const room = rooms.get(currentRoom);
-    if (!room) return;
+    const roomCode = currentRoom;
+    const room = rooms.get(roomCode);
+    if (!room) {
+      currentRoom = null;
+      return;
+    }
+
+    const leavingUser = room.users.get(socket.id);
+    const leavingName = leavingUser?.name || currentUserName;
 
     room.users.delete(socket.id);
     const deviceCount = room.users.size;
 
     if (deviceCount === 0) {
-      // Set timeout to destroy room
+      // Set timeout to destroy room after ROOM_TIMEOUT
       room.timeout = setTimeout(() => {
-        rooms.delete(currentRoom);
-        console.log(`Room ${currentRoom} destroyed (empty)`);
+        rooms.delete(roomCode);
+        console.log(`Room ${roomCode} destroyed (empty for ${ROOM_TIMEOUT / 60000} min)`);
       }, ROOM_TIMEOUT);
     } else {
       // Notify remaining users
-      io.to(currentRoom).emit('device-update', {
+      io.to(roomCode).emit('device-update', {
         deviceCount,
-        message: 'A device left'
+        message: `${leavingName} left`,
       });
+
+      broadcastUserList(roomCode, room);
     }
 
-    socket.leave(currentRoom);
-    console.log(`User ${socket.id} left room ${currentRoom}. Remaining: ${deviceCount}`);
+    socket.leave(roomCode);
+    clearSocketRateLimit(socket.id);
+    console.log(`User ${leavingName} (${socket.id}) left room ${roomCode}. Remaining: ${deviceCount}`);
     currentRoom = null;
   }
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', rooms: rooms.size });
-});
-
-const PORT = process.env.PORT || 3001;
+// ─── Start Server ───────────────────────────────────────────────────────────
 
 server.listen(PORT, () => {
-  console.log(`🚀 FlashChat server running on port ${PORT}`);
+  console.log(`🚀 FlashChat server v2.0 running on port ${PORT}`);
+  console.log(`   CORS origins: ${CORS_ORIGIN.join(', ')}`);
+  console.log(`   Room timeout: ${ROOM_TIMEOUT / 60000} minutes`);
+  console.log(`   Rate limit: ${SOCKET_RATE_LIMIT} msgs/min per socket`);
 });
