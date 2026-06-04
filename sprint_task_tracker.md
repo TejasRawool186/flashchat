@@ -70,9 +70,10 @@
 
 ## Day 3: Polish & Ship
 - [x] UI polish & animations
-- [ ] Deploy to Vercel (frontend) (Triggered - building on push)
+- [x] Deploy to Vercel (frontend) (vercel.json configured & verified)
 - [ ] Deploy to Hostinger VPS (backend) (Manual setup checklist ready)
 - [x] GitHub Actions CI/CD pipeline
 - [x] Premium README
 - [ ] Final testing
 - [x] (Stretch) AI Chat Assistant
+
