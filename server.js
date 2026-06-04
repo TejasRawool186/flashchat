@@ -530,7 +530,7 @@ io.on('connection', (socket) => {
         type: data.type || 'text',
         language: data.language || null,
         messageType: data.type || 'text',
-        encrypted: !!data.encrypted,
+        encrypted: data.encrypted || null,
         replyTo: data.replyTo
           ? {
               id: data.replyTo.id,

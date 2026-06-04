@@ -507,11 +507,11 @@ export const ChatScreen: React.FC = () => {
 
   return (
     <div
-      className="app chat-screen"
+      className="app-layout chat-screen"
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}
+      style={{ display: 'flex', flexDirection: 'row', height: '100vh', width: '100vw', overflow: 'hidden' }}
     >
       <DropZone isDragging={isDragging} />
       <Notification message={notification} visible={!!notification} onClose={() => setNotification('')} />
