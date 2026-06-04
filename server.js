@@ -448,9 +448,33 @@ io.on('connection', (socket) => {
 
       console.log(`User ${userName} (${socket.id}) joined room ${roomCode}. Devices: ${deviceCount}`);
 
-      // Send chat history to the new user
+      // Send chat history to the new user with reactions populated
       if (room.messages && room.messages.length > 0) {
-        socket.emit('chat-history', room.messages);
+        const messagesWithReactions = room.messages.map(msg => {
+          const emojiMap = room.reactions.get(msg.id);
+          const reactionSummary = [];
+          if (emojiMap) {
+            for (const [em, userSet] of emojiMap) {
+              const usersArray = [];
+              for (const uid of userSet) {
+                const u = room.users.get(uid);
+                usersArray.push({
+                  id: uid,
+                  name: u ? u.name : 'Anonymous'
+                });
+              }
+              reactionSummary.push({
+                emoji: em,
+                users: usersArray
+              });
+            }
+          }
+          return {
+            ...msg,
+            reactions: reactionSummary
+          };
+        });
+        socket.emit('chat-history', messagesWithReactions);
       }
 
       // Send current reaction state
@@ -583,10 +607,21 @@ io.on('connection', (socket) => {
 
       emojiMap.get(emoji).add(socket.id);
 
-      // Build reaction summary for broadcast
-      const reactionSummary = {};
+      // Build reaction summary for broadcast (Reaction[] format)
+      const reactionSummary = [];
       for (const [em, userSet] of emojiMap) {
-        reactionSummary[em] = Array.from(userSet);
+        const usersArray = [];
+        for (const uid of userSet) {
+          const u = room.users.get(uid);
+          usersArray.push({
+            id: uid,
+            name: u ? u.name : 'Anonymous'
+          });
+        }
+        reactionSummary.push({
+          emoji: em,
+          users: usersArray
+        });
       }
 
       io.to(currentRoom).emit('reaction-update', {
@@ -624,11 +659,22 @@ io.on('connection', (socket) => {
       if (userSet.size === 0) emojiMap.delete(emoji);
       if (emojiMap.size === 0) room.reactions.delete(messageId);
 
-      // Build reaction summary for broadcast
-      const reactionSummary = {};
+      // Build reaction summary for broadcast (Reaction[] format)
+      const reactionSummary = [];
       if (room.reactions.has(messageId)) {
         for (const [em, us] of room.reactions.get(messageId)) {
-          reactionSummary[em] = Array.from(us);
+          const usersArray = [];
+          for (const uid of us) {
+            const u = room.users.get(uid);
+            usersArray.push({
+              id: uid,
+              name: u ? u.name : 'Anonymous'
+            });
+          }
+          reactionSummary.push({
+            emoji: em,
+            users: usersArray
+          });
         }
       }
 

@@ -567,8 +567,10 @@
 
 /* Message wrapper */
 .message {
-  max-width: 70%;
-  min-width: 60px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 75%;
   animation: msgIn 0.22s var(--ease);
 }
 @keyframes msgIn {
@@ -576,8 +578,14 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-.message.sent { align-self: flex-end; }
-.message.received { align-self: flex-start; }
+.message.sent {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+.message.received {
+  align-self: flex-start;
+  flex-direction: row;
+}
 
 .message.grouped { margin-bottom: 2px; }
 .message.last-group { margin-bottom: 12px; }

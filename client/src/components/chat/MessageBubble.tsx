@@ -183,7 +183,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {/* Spacer to align grouped received messages */}
       {!isSelf && message.isGrouped && <div style={{ width: '32px', flexShrink: 0 }} />}
 
-      <div className="msg-bubble-wrap" style={{ maxWidth: '70%', display: 'flex', flexDirection: 'column' }}>
+      <div className="msg-bubble-wrap" style={{ maxWidth: '100%', flex: 1, display: 'flex', flexDirection: 'column' }}>
         {/* Sender name for received, first message in group */}
         {!isSelf && !message.isGrouped && (
           <span className="msg-sender-name" style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginBottom: '2px', marginLeft: '4px' }}>
