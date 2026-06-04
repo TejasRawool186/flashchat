@@ -66,11 +66,13 @@
 - [x] Markdown rendering (react-markdown)
 - [x] Link previews (server-side OG fetching)
 
+---
+
 ## Day 3: Polish & Ship
-- [ ] UI polish & animations
-- [ ] Deploy to Vercel (frontend)
-- [ ] Deploy to Hostinger VPS (backend)
-- [ ] GitHub Actions CI/CD pipeline
-- [ ] Premium README
+- [x] UI polish & animations
+- [ ] Deploy to Vercel (frontend) (Triggered - building on push)
+- [ ] Deploy to Hostinger VPS (backend) (Manual setup checklist ready)
+- [x] GitHub Actions CI/CD pipeline
+- [x] Premium README
 - [ ] Final testing
-- [ ] (Stretch) AI Chat Assistant
+- [x] (Stretch) AI Chat Assistant
