@@ -1233,4 +1233,84 @@
 @keyframes highlight-pulse {
   0% { background-color: rgba(253, 224, 71, 0.5); }
   100% { background-color: transparent; }
-}
+}
+
+/* ═══════════ PREMIUM SPRINT POLISH (Day 3) ═══════════ */
+
+/* Smooth message slide-up entry */
+.message {
+  animation: msgSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes msgSlideUp {
+  from { opacity: 0; transform: translateY(12px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Frosted glass effects for Home & Join Cards */
+.home-card {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(255, 255, 255, 0.82) !important;
+  border: 1px solid rgba(0, 0, 0, 0.05) !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Micro-animations for buttons and interactive items */
+.btn-create, .btn-join, .qr-btn, .hdr-btn {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.btn-create:hover:not(:disabled) {
+  background: #222 !important;
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+.btn-join:hover:not(:disabled) {
+  background: #111 !important;
+  color: #fff !important;
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Reaction badge bounce */
+.reaction-badge {
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+.reaction-badge:hover {
+  transform: scale(1.06) !important;
+  background: var(--bg-hover) !important;
+}
+.reaction-badge:active {
+  transform: scale(0.92) !important;
+}
+
+/* Link Previews Card Styling */
+.link-preview-card {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+.link-preview-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08) !important;
+  border-color: var(--accent) !important;
+}
+
+/* Scroll button bounce */
+.scroll-btn {
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  animation: bounceIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+@keyframes bounceIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+.scroll-btn:hover {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+  transform: scale(1.05) !important;
+}
+
+/* Input typing glow */
+.home-input:focus, .sb-search:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.05) !important;
+}
+

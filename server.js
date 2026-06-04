@@ -798,6 +798,67 @@ io.on('connection', (socket) => {
   }
 });
 
+// ─── AI Assistant Endpoint ──────────────────────────────────────────────────
+
+app.post('/api/ai/ask', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+    if (GEMINI_API_KEY) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 500 }
+        })
+      });
+      if (response.ok) {
+        const json = await response.json();
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          return res.json({ response: text.trim() });
+        }
+      }
+    } else if (OPENAI_API_KEY) {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 500
+        })
+      });
+      if (response.ok) {
+        const json = await response.json();
+        const text = json.choices?.[0]?.message?.content;
+        if (text) {
+          return res.json({ response: text.trim() });
+        }
+      }
+    }
+
+    return res.json({
+      response: `⚡ **FlashBot (AI Demo Mode)**\n\nI received your question: *"${prompt}"*\n\nTo enable live generative answers, please configure the \`GEMINI_API_KEY\` or \`OPENAI_API_KEY\` in your server's \`.env\` file.\n\nFlashChat uses E2E client-side encryption. This means even when interacting with me, your messages remain secure and are only decrypted by clients inside your room.`
+    });
+
+  } catch (err) {
+    console.error('AI assistant error:', err.message);
+    res.status(500).json({ error: 'AI Assistant failed to process request' });
+  }
+});
+
 // ─── Start Server ───────────────────────────────────────────────────────────
 
 server.listen(PORT, () => {

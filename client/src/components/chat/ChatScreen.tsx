@@ -292,6 +292,10 @@ export const ChatScreen: React.FC = () => {
       return;
     }
 
+    const trimmedText = text.trim();
+    const isAIAsk = trimmedText.startsWith('/ask ');
+    const question = isAIAsk ? trimmedText.substring(5).trim() : '';
+
     try {
       // Encrypt the message text client-side
       const encryptedPayload = await encrypt(roomKey, text);
@@ -312,6 +316,44 @@ export const ChatScreen: React.FC = () => {
       }
 
       socket.emit('send-message', messagePayload);
+
+      // Handle AI bot query in parallel if it is an /ask command
+      if (isAIAsk && question) {
+        const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+        fetch(`${SERVER_URL}/api/ai/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: question })
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error('AI request failed');
+            return res.json();
+          })
+          .then(async (data) => {
+            if (data.response) {
+              const encryptedBotPayload = await encrypt(roomKey, data.response);
+              socket.emit('send-message', {
+                senderName: 'FlashBot ⚡',
+                type: 'text',
+                encrypted: encryptedBotPayload,
+                text: `[Encrypted Message]`
+              });
+            }
+          })
+          .catch((err) => {
+            console.error('AI assistance failed:', err);
+            // Broadcast error message from Bot
+            encrypt(roomKey, '⚠ Failed to get a response from the AI assistant. Please check your connection.').then((errPayload) => {
+              socket.emit('send-message', {
+                senderName: 'FlashBot ⚡',
+                type: 'text',
+                encrypted: errPayload,
+                text: `[Encrypted Message]`
+              });
+            });
+          });
+      }
+
     } catch (err) {
       console.error('E2E Encryption send failed:', err);
       showNotif('Encryption failed!');
