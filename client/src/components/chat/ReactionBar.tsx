@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Reaction } from '../../types';
 
 interface ReactionBarProps {
@@ -17,6 +17,21 @@ export const ReactionBar: React.FC<ReactionBarProps> = ({
   socketId
 }) => {
   const [showQuickBar, setShowQuickBar] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setShowQuickBar(false);
+      }
+    }
+    if (showQuickBar) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showQuickBar]);
 
   const hasUserReacted = (reaction: Reaction) => {
     return reaction.users.some(u => u.id === socketId);
@@ -29,6 +44,7 @@ export const ReactionBar: React.FC<ReactionBarProps> = ({
 
   return (
     <div
+      ref={containerRef}
       className="reaction-bar-container"
       style={{
         display: 'flex',
@@ -38,8 +54,6 @@ export const ReactionBar: React.FC<ReactionBarProps> = ({
         marginTop: '4px',
         position: 'relative'
       }}
-      onMouseEnter={() => setShowQuickBar(true)}
-      onMouseLeave={() => setShowQuickBar(false)}
     >
       {/* Existing Reaction Badges */}
       {reactions.map((r) => {
