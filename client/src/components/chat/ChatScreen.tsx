@@ -547,7 +547,7 @@ export const ChatScreen: React.FC = () => {
       />
 
       {/* Main Chat Layout */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      <div className="chat-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', minWidth: 0 }}>
         <ChatHeader
           roomCode={upperCode}
           deviceCount={deviceCount}

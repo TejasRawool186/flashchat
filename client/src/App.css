@@ -1425,6 +1425,9 @@
   .landing-hdr { padding: 1.25rem 1.5rem; }
   .landing-nav { display: none; } /* Hide link tabs on mobile */
 
+  .chat-header { padding: 0.5rem 0.75rem !important; }
+  .messages { padding: 12px 10px !important; }
+
   /* Sliding Drawer Sidebar */
   .sidebar {
     display: flex !important;
@@ -1516,6 +1519,9 @@
     font-size: 0.75rem !important;
     text-align: center;
     display: inline-block !important;
+  }
+  .chat-header h2 {
+    font-size: 0.95rem !important;
   }
 }
 

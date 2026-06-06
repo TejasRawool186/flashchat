@@ -191,7 +191,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </span>
         )}
 
-        <div className="msg-bubble" style={{ position: 'relative' }}>
+        <div
+          className="msg-bubble"
+          style={{
+            position: 'relative',
+            padding: isImage ? '0' : undefined,
+            overflow: isImage ? 'hidden' : undefined,
+            background: isImage ? 'none' : undefined,
+            border: isImage ? 'none' : undefined,
+            boxShadow: isImage ? 'none' : undefined
+          }}
+        >
           {/* Quoted Reply Preview */}
           {message.replyTo && (
             <div
