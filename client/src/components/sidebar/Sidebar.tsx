@@ -10,6 +10,8 @@ interface SidebarProps {
   messages: Message[];
   onSearchResult: (msgId: string) => void;
   socketId: string;
+  className?: string;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -19,7 +21,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isEncrypted,
   messages,
   onSearchResult,
-  socketId
+  socketId,
+  className = '',
+  onClose
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -38,9 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     : [];
 
   return (
-    <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <aside className={`sidebar ${className}`} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Sidebar Header */}
-      <div className="sb-header" style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
+      <div className="sb-header" style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="sb-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <svg
             className="home-logo-icon"
@@ -57,6 +61,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             FlashChat
           </span>
         </div>
+        {onClose && (
+          <button className="sb-close-btn" onClick={onClose} title="Close Sidebar">
+            ✕
+          </button>
+        )}
       </div>
 
       {/* Room Info Panel */}

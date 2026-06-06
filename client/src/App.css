@@ -698,15 +698,19 @@
 }
 
 .hdr-btn {
-  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 36px;
-  border-radius: 10px;
+  padding: 0 12px;
+  border-radius: 12px;
   border: 1px solid var(--border);
   background: #fff;
   cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-2);
   transition: all var(--normal) var(--ease);
   font-family: inherit;
 }
@@ -1262,8 +1266,10 @@
 .picker {
   position: fixed;
   bottom: 0;
-  left: 0;
-  right: 0;
+  left: 50%;
+  transform: translate(-50%, 0);
+  width: 100%;
+  max-width: 440px;
   background: #fff;
   border-radius: 20px 20px 0 0;
   padding: 1rem 1.5rem 2rem;
@@ -1272,8 +1278,8 @@
   animation: slideUp 0.3s var(--ease);
 }
 @keyframes slideUp {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from { transform: translate(-50%, 100%); }
+  to { transform: translate(-50%, 0); }
 }
 
 .picker-handle {
@@ -1389,10 +1395,25 @@
 }
 .img-viewer-close:hover { background: rgba(255,255,255,0.3); }
 
+/* Toggle visibility defaults */
+.sidebar-toggle-btn {
+  display: none !important;
+}
+.sb-close-btn {
+  display: none !important;
+}
+
+/* Sent message reactions styling */
+.message.sent .reaction-bar-container {
+  justify-content: flex-end;
+}
+.message.sent .quick-reaction-popover {
+  left: auto;
+  right: 0;
+}
 
 /* ═══════════ RESPONSIVE ═══════════ */
 @media (max-width: 768px) {
-  .sidebar { display: none; }
   .app-layout { flex-direction: column; }
   .chat-main { width: 100%; }
   .message { max-width: 85%; }
@@ -1403,7 +1424,101 @@
   .landing-title { font-size: 2.25rem; }
   .landing-hdr { padding: 1.25rem 1.5rem; }
   .landing-nav { display: none; } /* Hide link tabs on mobile */
+
+  /* Sliding Drawer Sidebar */
+  .sidebar {
+    display: flex !important;
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 80vw;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--bg);
+    box-shadow: var(--shadow-lg);
+    border-right: 1px solid var(--border);
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;
+  }
+
+  /* Mobile Close & Toggle Controls */
+  .sidebar-toggle-btn {
+    display: inline-flex !important;
+  }
+  .sb-close-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    font-size: 0.9rem;
+    cursor: pointer;
+    color: var(--text-2);
+    transition: all 0.2s;
+  }
+  .sb-close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  /* Compact Header Actions */
+  .hdr-btn span {
+    display: none !important;
+  }
+  .hdr-btn {
+    padding: 0 !important;
+    width: 36px;
+    height: 36px;
+    border-radius: 50% !important;
+  }
+  .chat-header-actions {
+    gap: 0.35rem !important;
+  }
+
+  /* Responsive Emoji Picker */
+  .input-emoji-picker {
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 72px !important;
+    width: calc(100% - 16px) !important;
+  }
+  .input-emoji-picker > div,
+  .input-emoji-picker .EmojiPickerReact {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Code message blocks inside bubbles */
+  .code-msg-container {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .code-msg-container pre {
+    font-size: 0.75rem !important;
+  }
 }
+
+@media (max-width: 480px) {
+  .landing-title {
+    font-size: 1.8rem !important;
+  }
+  .home-center {
+    padding: 2rem 1rem 3rem !important;
+  }
+  .landing-badge {
+    font-size: 0.75rem !important;
+    text-align: center;
+    display: inline-block !important;
+  }
+}
+
 
 @media (min-width: 769px) and (max-width: 1023px) {
   .sidebar { width: 220px; min-width: 200px; }

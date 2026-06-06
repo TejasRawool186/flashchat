@@ -8,6 +8,7 @@ interface ChatHeaderProps {
   onCopyCode: () => void;
   onLeave: () => void;
   onShareQR: () => void;
+  onToggleSidebar: () => void;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -17,12 +18,20 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   isEncrypted,
   onCopyCode,
   onLeave,
-  onShareQR
+  onShareQR,
+  onToggleSidebar
 }) => {
   return (
     <header className="chat-header">
       <div className="chat-header-info">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button className="hdr-btn sidebar-toggle-btn" onClick={onToggleSidebar} title="Room Info">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>Room {roomCode}</h2>
           {isEncrypted && (
             <span

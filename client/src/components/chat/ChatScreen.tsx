@@ -47,6 +47,7 @@ export const ChatScreen: React.FC = () => {
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
   const [notification, setNotification] = useState('');
   const [error, setError] = useState('');
+  const [showSidebarMobile, setShowSidebarMobile] = useState(false);
 
   // Refs for tracking files and URLs
   const pendingFiles = useRef<Record<string, any>>({});
@@ -516,6 +517,22 @@ export const ChatScreen: React.FC = () => {
       <DropZone isDragging={isDragging} />
       <Notification message={notification} visible={!!notification} onClose={() => setNotification('')} />
 
+      {/* Sidebar mobile backdrop overlay */}
+      {showSidebarMobile && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setShowSidebarMobile(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 999,
+            backdropFilter: 'blur(4px)',
+            animation: 'fadeIn 0.2s ease'
+          }}
+        />
+      )}
+
       {/* Sidebar Panel */}
       <Sidebar
         roomCode={upperCode}
@@ -525,6 +542,8 @@ export const ChatScreen: React.FC = () => {
         messages={messages}
         onSearchResult={handleSearchResultClick}
         socketId={socket.id || ''}
+        className={showSidebarMobile ? 'mobile-open' : ''}
+        onClose={() => setShowSidebarMobile(false)}
       />
 
       {/* Main Chat Layout */}
@@ -543,6 +562,7 @@ export const ChatScreen: React.FC = () => {
             socket.emit('leave-room');
             navigate('/');
           }}
+          onToggleSidebar={() => setShowSidebarMobile(!showSidebarMobile)}
         />
 
         {/* Message Container */}
