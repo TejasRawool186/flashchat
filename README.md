@@ -1,25 +1,51 @@
-# ⚡ FlashChat v2.0 — Ephemeral & E2E Encrypted Chat Portal
+# ⚡ FlashChat — Ephemeral & E2E Encrypted Chat Portal
 
-> **GitHub Finish-Up-A-Thon Challenge Submission**
-> Live Demo (Frontend): *[Default Vercel deployment]*
-> Live Demo (Backend API): *[Default Hostinger VPS reverse proxy]*
-
-FlashChat is a privacy-first, zero-login, temporary messaging and file-sharing portal. Reimagined and rebuilt for the GitHub Finish-Up-A-Thon, FlashChat v2.0 takes an abandoned prototype and transforms it into a production-grade secure application featuring client-side End-to-End Encryption (E2E), alphanumeric room allocations, real-time message reactions, link previews, and a secure local AI assistant.
+FlashChat is a privacy-first, zero-login, temporary messaging and file-sharing portal. It is designed to be a secure, zero-config workspace for developers and teams who need to share code snippets, files, and links in absolute privacy. Under the hood, it features client-side End-to-End Encryption (E2E) via Web Crypto APIs, alphanumeric room allocations, real-time message reactions, link previews, and a secure local AI assistant.
 
 ---
 
-## 📸 The Transformation (Before & After)
+## 📸 Interface Showcase
 
-| Metric / Dimension | Before (Abandonment) | After (v2.0 Transformation) |
-|--------------------|----------------------|-----------------------------|
-| **Architecture**   | Monolithic single 825-line React file | Decomposed into **17 React+TypeScript modules** |
-| **Type Safety**    | Plain JavaScript with runtime crash risks | Strict TypeScript compile check verified |
-| **Security**       | None. Server logs plaintext; direct XSS paths | **Client-Side E2E (AES-GCM)**, Helmet, CSP, Sanitization |
-| **Room Code**      | Simple 6-digit numbers (easily guessed) | Secure 6-character alphanumeric hashes |
-| **Asset Overhead** | Heavy 2.8 MB background SVG loading | Responsive CSS-only radial dots pattern (0 KB) |
-| **Rate Limiting**  | None. Vulnerable to socket/HTTP floods | HTTP express-rate-limit + socket flood prevention |
-| **Social Features**| Missing reactions, replies, and read indicators | Implemented quote-threads, reactions, blue ticks |
-| **AI Integration** | None | Secure E2E-wrapped `/ask` AI Assistant |
+### Elegant Landing & Setup
+![Hero Landing Page](./assets/hero_section.png)
+![Features Preview](./assets/features_card.png)
+
+### Desktop Chat Interface
+![Desktop Chat Interface](./assets/desktop_chat.png)
+
+### Highly Responsive Mobile Layouts
+<div align="center">
+  <img src="./assets/mobile_chat_iphone.png" width="48%" alt="Mobile iOS Chat" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="./assets/mobile_chat_android.png" width="48%" alt="Mobile Android Chat" />
+</div>
+
+---
+
+## 💻 My Experience with GitHub Copilot
+
+FlashChat began as a raw, single-file JavaScript prototype—an abandoned monolithic `App.jsx` file (over 800 lines of spaghetti code) containing mixed logic for sockets, file chunking, UI components, and state management. The code was prone to runtime errors, vulnerable to XSS attacks, and lacked any mobile responsiveness.
+
+By pairing with **GitHub Copilot**, I turned this prototype into a production-grade, modular, and highly secure web application. Here is how Copilot helped guide the journey:
+
+### 1. Decomposing the Monolith (JS to TypeScript)
+Refactoring a monolithic codebase can be tedious and error-prone. I asked Copilot to help split the single React file into 17 strongly-typed TypeScript components. 
+* Copilot analyzed the unified React state and automatically generated clean TypeScript interface prop definitions for key components like [MessageBubble](file:///d:/FlashChat/client/src/components/chat/MessageBubble.tsx), [Sidebar](file:///d:/FlashChat/client/src/components/sidebar/Sidebar.tsx), and [InputBar](file:///d:/FlashChat/client/src/components/chat/InputBar.tsx).
+* It speeded up the migration by suggesting proper Type parameters for event handlers and DOM references (`React.DragEvent`, `HTMLTextAreaElement`), ensuring zero compile-time errors.
+
+### 2. Implementing client-side E2E Encryption
+I wanted messages to be encrypted client-side using the **Web Crypto API (AES-GCM-256)** so that the server only acts as a blind relay.
+* Instead of digging through pages of MDN documentation, Copilot helped me draft [crypto.ts](file:///d:/FlashChat/client/src/lib/crypto.ts). It instantly generated helper functions to derive shared keys from the alphanumeric room code using **PBKDF2**, handle binary arrays, and export/import public keys.
+* When I got stuck on how to handle initialization vectors (IVs) safely in transit, Copilot recommended prepending the `iv` directly to the encrypted ciphertext and parsing it back during decryption—a standard, robust cryptographic pattern.
+
+### 3. Creating a Mobile-First Responsive Layout
+On mobile viewports, the chat layout was originally broken, with sent bubbles clipping off-screen and the sidebar stacking vertically.
+* I used Copilot to refactor the [Sidebar](file:///d:/FlashChat/client/src/components/sidebar/Sidebar.tsx) into a sliding drawer. Copilot suggested CSS transitions and absolute positioning triggers that translate the sidebar off-screen (`transform: translateX(-100%)`) and sliding it in smoothly when the hamburger button is clicked.
+* When the main chat container stretched and pushed the right-side components (like the send button and scroll indicators) off the screen on smaller viewports, Copilot pinpointed a classic flexbox issue and suggested adding `min-width: 0;` and `overflow: hidden;` to the `.chat-main` wrapper—instantly resolving the layout overflow.
+
+### 4. Hardening Security (XSS & SSRF)
+Security is paramount for an encrypted portal.
+* Copilot helped write server-side middleware to sanitize text input using DOMPurify, and suggested SSRF protection blocks inside Nginx and the backend link scraper to verify that outgoing requests do not target private IP subnets.
 
 ---
 
@@ -133,12 +159,5 @@ Run these inside the `/client` directory to verify build state and type compatib
 - **Production Build Packaging**: `npm run build`
 
 ---
-
-## 🤖 Built with GitHub Copilot & AI
-
-This revival project showcases how GitHub Copilot and agentic AI pairs can work together to refactor legacy codebases:
-- Monolithic structures were audited and parsed into clean design patterns.
-- ECDH/AES-GCM Web Crypto pipelines were structured and compiled dynamically.
-- System security issues like XSS and SSRF were analyzed and patched systematically.
 
 *FlashChat is released under the [MIT License](LICENSE).*
